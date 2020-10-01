@@ -1,0 +1,111 @@
+from loss import Loss
+from activation import  Activation
+import numpy as np
+
+
+class Model:
+    # TODO add validation set and early stopping to training
+    # TODO have a look at dropout and other regularizing techniques
+    # TODO add error handling for mismatching layer input/output
+
+    losses = {
+        "cross_entropy": Loss.cross_entropy
+    }
+    losses_prime = {
+        "cross_entropy": Loss.cross_entropy_prime
+    }
+
+    activations = {
+        "sigmoid": Activation.softmax,
+        "tanh": Activation.tanh,
+        "relu": Activation.relu,
+        "softmax": Activation.softmax
+    }
+    activations_prime = {
+        "sigmoid": Activation.softmax_prime,
+        "tanh": Activation.tanh_prime,
+        "relu": Activation.relu_prime,
+        "softmax": Activation.softmax_prime
+    }
+
+    def __init__(self, loss="cross_entropy"):
+        self.layers = []
+        self.loss = loss
+
+    def add_layer(self, layer):
+        self.layers.append(layer)
+
+    def forward(self, input):
+        for layer in self.layers:
+            if type(layer) == "dense.Dense":
+                input = input.flatten
+            input = layer.forward(input)
+        return input
+
+    def backward(self, gradient, step=0.005):
+        for layer in reversed(self.layers):
+            gradient = layer.backward(gradient, step)
+        return gradient
+
+    def train(self, data, labels, epochs=3, step=0.001):
+        for epoch in range(epochs):
+            print("Epoch", epoch + 1)
+            order = np.random.permutation(len(data))
+            data, labels = data[order], labels[order]
+
+            total_loss = 0
+            num_correct = 0
+            for i, (image, label) in enumerate(zip(data, labels)):
+                out = self.forward((image / 255) - 0.5)
+                total_loss += self.calculate_loss(out, label)
+                num_correct += 1 if np.argmax(out) == label else 0
+
+                if i == 0 and epoch == 0:
+                    print("Step:", i, "Loss:", total_loss)
+                elif i % 100 == 0 and i != 0:
+                    print("Step:", i, "Past 100 steps: Average loss:", total_loss/100, "Accuracy:", num_correct, "%")
+                    total_loss = 0
+                    num_correct = 0
+
+                target = np.zeros(self.layers[-1].nodes)
+                target[label] = 1
+                gradient = self.calculate_loss_prime(out, target)
+                gradient = self.backward(gradient, step)
+
+    def test(self, data, labels):
+        total_loss = 0
+        num_correct = 0
+        for i, (image, label) in enumerate(zip(data, labels)):
+            out = self.forward((image / 255) - 0.5)
+            total_loss += self.calculate_loss(out, label)
+            num_correct += 1 if np.argmax(out) == label else 0
+
+        print('Test Loss:', total_loss/i)
+        print('Test Accuracy:', num_correct/i)
+
+    def calculate_loss(self, out, label):
+        return Model.losses[self.loss](out, label)
+
+    def calculate_loss_prime(self, out, target):
+        return Model.losses_prime[self.loss](out, target)
+
+
+if __name__ == '__main__':
+    import mnist
+    from conv import Conv
+    from pool import Pool
+    from dense import Dense
+
+    train_images = mnist.train_images()[:1000]
+    train_labels = mnist.train_labels()[:1000]
+
+    model = Model(loss="cross_entropy")
+    model.add_layer(Conv(1, 8))
+    model.add_layer(Pool())
+    model.add_layer(Dense(14 * 14 * 8, 10))
+
+    model.train(train_images, train_labels)
+
+    test_images = mnist.test_images()[:1000]
+    test_labels = mnist.test_labels()[:1000]
+    model.test(test_images, test_labels)
