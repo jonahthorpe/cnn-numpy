@@ -7,6 +7,7 @@ class Model:
     # TODO add validation set and early stopping to training
     # TODO have a look at dropout and other regularizing techniques
     # TODO add error handling for mismatching layer input/output
+    # ToDo add ability to save and load models
 
     losses = {
         "cross_entropy": Loss.cross_entropy
@@ -16,13 +17,13 @@ class Model:
     }
 
     activations = {
-        "sigmoid": Activation.softmax,
+        "sigmoid": Activation.sigmoid,
         "tanh": Activation.tanh,
         "relu": Activation.relu,
         "softmax": Activation.softmax
     }
     activations_prime = {
-        "sigmoid": Activation.softmax_prime,
+        "sigmoid": Activation.sigmoid_prime,
         "tanh": Activation.tanh_prime,
         "relu": Activation.relu_prime,
         "softmax": Activation.softmax_prime
@@ -102,7 +103,7 @@ if __name__ == '__main__':
     model = Model(loss="cross_entropy")
     model.add_layer(Conv(1, 8))
     model.add_layer(Pool())
-    model.add_layer(Dense(14 * 14 * 8, 10))
+    model.add_layer(Dense(10, 10))
 
     model.train(train_images, train_labels)
 

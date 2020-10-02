@@ -40,7 +40,10 @@ class Dense:
         """
         # derivative of loss w.r.t weight = dl/do . do/ds . ds/dw
         d_out_d_summed_weights = self.activation_prime(self.activations)
-        d_loss_d_summed_weights = np.dot(d_out_d_summed_weights, d_loss_d_out)
+        if len(d_out_d_summed_weights.shape) == 1:
+            d_loss_d_summed_weights = d_out_d_summed_weights * d_loss_d_out
+        else:
+            d_loss_d_summed_weights = np.dot(d_out_d_summed_weights, d_loss_d_out)
         # ds/dw = input ( t = input * w + b)
         d_loss_d_weights = np.zeros((self.input_len, self.nodes))
         for i, input in enumerate(self.input):
@@ -59,9 +62,6 @@ class Dense:
         # ds/di = w ( t = input * w + b)
         d_loss_d_input = self.weights @ d_loss_d_summed_weights
         return d_loss_d_input.reshape(self.input_shape)
-
-    def activate(self, weighted_sum):
-        return Activation.activations[weighted_sum]
 
 
 if __name__ == '__main__':
