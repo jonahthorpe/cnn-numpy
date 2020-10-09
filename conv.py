@@ -7,12 +7,15 @@ class Conv:
     # TODO add different stride sizes
     # TODO add bias
 
-    def __init__(self, input_channels, num_filters):
+    def __init__(self, input_channels, num_filters, padding="valid"):
         self.num_filters = num_filters
 
         # filters is a 3d array with dimensions (num_filters, 3, 3)
         # We divide by 9 to reduce the variance of our initial values
         self.filters = np.random.randn(input_channels, num_filters, 3, 3)/input_channels
+
+        self.padding = padding
+        self.pad = 0
 
     def forward(self, input):
         """
@@ -21,10 +24,9 @@ class Conv:
         :return numpy.ndarray output: numpy array of shape (height, width, filters)
         """
         input = self.pad_image(input)
-        self.input = input
         height, width, channels = input.shape
+        self.input_padded = input
         output = np.zeros((height - 2, width - 2, self.num_filters))
-
         # slide left to right, top to bottom
         for h in range(height - 2):
             for w in range(width - 2):
@@ -47,54 +49,69 @@ class Conv:
         input
         """
         channels, _, height_f, width_f = self.filters.shape
+
         height_l, width_l, filters = d_loss_d_out.shape
+
         d_loss_d_filters = np.zeros(self.filters.shape)
-        d_loss_d_input = np.zeros(self.input.shape)
+
+        height_i, width_i, _ = self.input_padded.shape
+        d_loss_d_input = np.zeros(self.input_padded.shape)
 
         # calculate the derivative of the loss w.r.t the filers
         # convolution between the input data and derivative of the loss w.r.t to the output
-        for h_f in range(height_f):
-            for w_f in range(width_f):
+        for h in range(height_i - height_l + 1):
+            for w in range(width_i - width_l + 1):
                 for c in range(channels):
-                    im_region = self.input[h_f: h_f + height_l, w_f: w_f + width_l, c]
+                    im_region = self.input_padded[h: h + height_l, w: w + width_l, c]
                     for f in range(filters):
                         loss_region = d_loss_d_out[0: height_l, 0: width_l, f]
                         # de/df = de/do * do/df
-                        d_loss_d_filters[c, f, h_f, w_f] += np.sum(loss_region * im_region)
+                        d_loss_d_filters[c, f, h, w] += np.sum(loss_region * im_region)
+
 
         # calculate the derivative of the loss w.r.t the input
         # a full convolution between the derivative of the loss w.r.t to the output and filters rotated 180 degrees
-        # pad with 0 so its a full convolution
+        # pad with 0s so full convolution is equivalent to normal convolution of un padded matrix
         padded_loss = np.pad(d_loss_d_out, ((2, 2), (2, 2), (0, 0)), 'constant', constant_values=0)
-        # iterate over the height/width of the loss + filter
         for h in range(height_l + height_f - 1):
             for w in range(width_l + width_f - 1):
+                # get the slice of data from the loss
+                loss_region = padded_loss[h: h + height_f, w: w + width_f]
                 for c in range(channels):
-                    # get the slice of data from the loss
-                    loss_region = padded_loss[h: h + height_f, w: w + width_f]
                     # rotate filter
                     rotated_filter = np.rot90(np.rot90(self.filters[c], axes=(1, 2)), axes=(1, 2))
-                    # print(np.sum(np.sum((np.rollaxis(im_region, 2, 0) * self.filters[c]), axis=(1, 2))))
                     # find convolution of the filter and loss
                     d_loss_d_input[h, w, c] = np.sum((np.rollaxis(loss_region, 2, 0) * rotated_filter))
 
+        if self.pad != 0:
+            d_loss_d_input = d_loss_d_input[self.pad: -self.pad, self.pad: -self.pad]
         # Update filters
         self.filters -= step * d_loss_d_filters
         return d_loss_d_input
 
     def pad_image(self, image):
-        return self.same_pad(image)
-
-    def same_pad(self, image):
         """
-        Performs same padding on the input image.
-        :param numpy.ndarray image: numpy array of shape (height, width, channels) or (height, width)
-        :return numpy.ndarray padded_image: numpy array of shape (height, width, channels)
-        """
+       Performs padding on the input image.
+       :param numpy.ndarray image: numpy array of shape (height, width, channels) or (height, width)
+       :return numpy.ndarray padded_image: numpy array of shape (height, width, channels)
+       """
         # check for 2d array
         if len(image.shape) == 2:  # if 2d resize
             height, width = image.shape
             image.resize(height, width, 1)
+
+        if self.padding == "same":
+            return self.same_pad(image)
+        else:
+            return image
+
+    def same_pad(self, image):
+        """
+        Performs same padding on the input image.
+        :param numpy.ndarray image: numpy array of shape (height, width, channels)
+        :return numpy.ndarray padded_image: numpy array of shape (height, width, channels)
+        """
+        self.pad = 1
         return np.pad(image, ((1, 1), (1, 1), (0, 0)), 'constant', constant_values=0)
 
 
