@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import scipy.signal
 
 
 class Conv:
@@ -11,8 +12,8 @@ class Conv:
         self.num_filters = num_filters
 
         # filters is a 3d array with dimensions (num_filters, 3, 3)
-        # We divide by 9 to reduce the variance of our initial values
-        self.filters = np.random.randn(input_channels, num_filters, 3, 3)/input_channels
+        #self.filters = np.random.randn(input_channels, num_filters, 3, 3) / (3 * 3 * input_channels)
+        self.filters = np.random.rand(input_channels, num_filters, 3, 3) / (3 * 3 * input_channels)
 
         self.padding = padding
         self.pad = 0
@@ -36,7 +37,6 @@ class Conv:
                     im_region = input[h:(h + 3), w:(w + 3), channel]
                     # apply filter
                     output[h, w] += np.sum(im_region * self.filters[channel], axis=(1, 2))
-
         return output
 
     def backward(self, d_loss_d_out, step):
@@ -68,7 +68,6 @@ class Conv:
                         # de/df = de/do * do/df
                         d_loss_d_filters[c, f, h, w] += np.sum(loss_region * im_region)
 
-
         # calculate the derivative of the loss w.r.t the input
         # a full convolution between the derivative of the loss w.r.t to the output and filters rotated 180 degrees
         # pad with 0s so full convolution is equivalent to normal convolution of un padded matrix
@@ -82,10 +81,9 @@ class Conv:
                     rotated_filter = np.rot90(np.rot90(self.filters[c], axes=(1, 2)), axes=(1, 2))
                     # find convolution of the filter and loss
                     d_loss_d_input[h, w, c] = np.sum((np.rollaxis(loss_region, 2, 0) * rotated_filter))
-
         if self.pad != 0:
             d_loss_d_input = d_loss_d_input[self.pad: -self.pad, self.pad: -self.pad]
-        # Update filters
+            # Update filters
         self.filters -= step * d_loss_d_filters
         return d_loss_d_input
 
@@ -115,8 +113,145 @@ class Conv:
         return np.pad(image, ((1, 1), (1, 1), (0, 0)), 'constant', constant_values=0)
 
 
+class DepthWiseConv(Conv):
+
+    def __init__(self, input_channels, num_filters, padding="valid"):
+        super().__init__(input_channels, num_filters, padding)
+
+        # filters is a 3d array with dimensions (num_filters, 3, 3)
+        self.depth_wise_filters = np.random.randn(input_channels, 3, 3) / (3 * 3 * input_channels)
+        self.point_wise_filters = np.random.randn(input_channels, num_filters, 1, 1) / input_channels
+
+    def forward(self, input):
+        input = self.pad_image(input)
+        height, width, channels = input.shape
+        self.input_padded = input
+        depth_wise_output = np.zeros((height - 2, width - 2, channels))
+        point_wise_output = np.zeros((height - 2, width - 2, self.num_filters))
+        '''
+        for h in range(height - 2):
+            for w in range(width - 2):
+                # get the region of the image you are working on
+                im_region = input[h:(h + 3), w:(w + 3)]
+                # apply filter
+                depth_wise_output[h, w] = np.sum(np.rollaxis(im_region, 2, 0) * self.depth_wise_filters)
+                '''
+        for channel in range(channels):
+            depth_wise_output[:, :, channel] = scipy.signal.correlate(self.input_padded[:, :, channel],
+                                                                      self.depth_wise_filters[channel],
+                                                                      mode="valid")
+            point_wise_output += np.moveaxis(depth_wise_output[:, :, channel] * self.point_wise_filters[channel], 0, 2)
+        self.depth_wise_output = depth_wise_output
+        return point_wise_output
+
+    def backward(self, d_loss_d_out, step):
+        """
+        Performs the backward pass of the convolution layer.
+        :param numpy.ndarray d_loss_d_out: derivative of loss w.r.t the output of the forward pass. Same shape as the
+        output of the forward pass
+        :param float step: learning rate used in weight change
+        :return numpy.ndarray d_loss_d_input: derivative of loss w.r.t the input of the forward pass. Same shape as the
+        input
+        """
+        height_l, width_l, filters = d_loss_d_out.shape
+
+        d_loss_d_point_wise_filters = np.zeros(self.point_wise_filters.shape)
+        _, height_d_f, width_d_f = self.depth_wise_filters.shape
+        d_loss_d_depth_wise_filters = np.zeros(self.depth_wise_filters.shape)
+
+        height_i, width_i, channels = self.input_padded.shape
+        height_d, width_d ,_ = self.depth_wise_output.shape
+
+        d_loss_d_input_depth = np.zeros(self.input_padded.shape)
+        d_loss_d_input_point = np.zeros(self.depth_wise_output.shape)
+        # calculate the derivative of the loss w.r.t the filers
+        # convolution between the input data and derivative of the loss w.r.t to the output
+        for c in range(channels):
+            im_region = self.depth_wise_output[:, :, c]
+            for f in range(filters):
+                loss_region = d_loss_d_out[:, :, f]
+                # de/df = de/do * do/df
+                d_loss_d_point_wise_filters[c, f, :, :] += np.sum(loss_region * im_region)
+                # calculate the derivative of the loss w.r.t the input
+                # a full convolution between the derivative of the loss w.r.t to the output and filters rotated 180 degrees
+                d_loss_d_input_point[:, :, c] += d_loss_d_out[:, :, f] * self.point_wise_filters[c, f]
+
+        d_loss_d_input_point = d_loss_d_input_point
+
+        for c in range(channels):
+            d_loss_d_depth_wise_filters[c] += scipy.signal.correlate(self.input_padded[:, :, c], d_loss_d_input_point[:, :, c],
+                                                             mode="valid")
+            rotated_filter = np.rot90(np.rot90(self.depth_wise_filters[c], axes=(0, 1)), axes=(0, 1))
+            d_loss_d_input_depth[:, :, c] += scipy.signal.correlate(d_loss_d_input_point[:, :, c], rotated_filter, mode="full")
+        '''
+        # calculate the derivative of the loss w.r.t the filers
+        # convolution between the input data and derivative of the loss w.r.t to the output
+        for h in range(height_i - height_l + 1):
+            for w in range(width_i - width_l + 1):
+                for c in range(channels):
+                    im_region = self.input_padded[h: h + height_l, w: w + width_l, c]
+                    loss_region = d_loss_d_input_point[0: height_l, 0: width_l, c]
+                    # de/df = de/do * do/df
+                    d_loss_d_depth_wise_filters[c, h, w] += np.sum(loss_region * im_region)
+
+        # calculate the derivative of the loss w.r.t the input
+        # a full convolution between the derivative of the loss w.r.t to the output and filters rotated 180 degrees
+        # pad with 0s so full convolution is equivalent to normal convolution of un padded matrix
+        padded_loss = np.pad(d_loss_d_input_point, ((2, 2), (2, 2), (0, 0)), 'constant', constant_values=0)
+        for h in range(height_l + height_d_f - 1):
+            for w in range(width_l + width_d_f - 1):
+                # get the slice of data from the loss
+                loss_region = padded_loss[h: h + height_d_f, w: w + width_d_f]
+                # rotate filter
+                rotated_filter = np.rot90(np.rot90(self.depth_wise_filters, axes=(1, 2)), axes=(1, 2))
+                # find convolution of the filter and loss
+                d_loss_d_input_depth[h, w] = np.sum(np.rollaxis(loss_region, 2, 0) * rotated_filter, axis=(1, 2))
+        '''
+        if self.pad != 0:
+            d_loss_d_input_depth = d_loss_d_input_depth[self.pad: -self.pad, self.pad: -self.pad]
+            # Update filters
+        self.depth_wise_filters -= step * d_loss_d_depth_wise_filters
+        self.point_wise_filters -= step * d_loss_d_point_wise_filters
+        return d_loss_d_input_depth
+
+
+class ScipyConv(Conv):
+
+    def forward(self, input):
+        input = self.pad_image(input)
+        height, width, channels = input.shape
+        self.input_padded = input
+        output = np.zeros((height - 2, width - 2, self.num_filters))
+        for f in range(self.num_filters):
+            for c in range(channels):
+                output[:, :, f] += scipy.signal.correlate(input[:, :, c], self.filters[c, f], mode="valid")
+        return output
+
+    def backward(self, d_loss_d_out, step):
+        channels, _, height_f, width_f = self.filters.shape
+
+        d_loss_d_filters = np.zeros(self.filters.shape)
+
+        height_i, width_i, _ = self.input_padded.shape
+        d_loss_d_input = np.zeros(self.input_padded.shape)
+
+        for c in range(channels):
+            rotated_filter = np.rot90(np.rot90(self.filters[c], axes=(1, 2)), axes=(1, 2))
+            for f in range(self.num_filters):
+                d_loss_d_filters[c, f] += scipy.signal.correlate(self.input_padded[:, :, c], d_loss_d_out[:, :, f],
+                                                                 mode="valid")
+                d_loss_d_input[:, :, c] += scipy.signal.correlate(d_loss_d_out[:, :, f], rotated_filter[f], mode="full")
+        if self.pad != 0:
+            d_loss_d_input = d_loss_d_input[self.pad: -self.pad, self.pad: -self.pad]
+            # Update filters
+
+        self.filters -= step * d_loss_d_filters
+        return d_loss_d_input
+
+
 if __name__ == '__main__':
     import time
+    '''
     conv = Conv(3, 4)
     conv2 = Conv(4, 16)
     image_grey = cv2.cvtColor(cv2.imread("lenna.png"), cv2.COLOR_RGB2GRAY)
@@ -145,7 +280,21 @@ if __name__ == '__main__':
     #print(a_r)
     #print(a_r.shape)
     end = time.time()
-
+    '''
+    image = cv2.imread("lenna.png")
+    conv = Conv(3, 32)
+    conv2 = Conv(32, 64)
+    start = time.time()
+    a = conv.forward(image)
+    a = conv2.forward(a)
+    end = time.time()
+    print(end-start)
+    start = time.time()
+    a = conv.forward_test(image)
+    a = conv2.forward_test(a)
+    end = time.time()
+    print(end - start)
+    '''
     # test rotating image
     print(image.shape)
     # change shape to be same as filter
@@ -160,3 +309,4 @@ if __name__ == '__main__':
     # show image to see if rotated
     cv2.imshow("rotate", np.rollaxis(temp, 2, 0))
     cv2.waitKey()
+    '''

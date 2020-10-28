@@ -9,13 +9,24 @@ class Loss:
     @staticmethod
     def cross_entropy(predictions, target):
         # - sum target[class] log(predicted[class])
-        return -np.log(max(predictions[target], 1e-200))
-
+        return -np.log(max(predictions[target], 1e-5))
 
     @staticmethod
-    def cross_entropy_prime(predictions, targets):
+    def cross_entropy_prime(predictions, label):
+        targets = np.zeros(len(predictions))
+        targets[label] = 1
         # - correct[class] / prediction
-        return - targets / (predictions + 1e-200)
+        return - targets / (predictions + 1e-5)
+
+    @staticmethod
+    def binary_cross_entropy(predictions, target):
+        # - sum target[class] log(predicted[class])
+        return -(target * np.log(predictions[0] + 1e-15) + (1 - target) * np.log(1 - predictions[0] + 1e-15))
+
+    @staticmethod
+    def binary_cross_entropy_prime(predictions, label):
+        # - correct[class] / prediction
+        return - label / predictions + (1 - label) / (1 - predictions)
 
 
 if __name__ == '__main__':

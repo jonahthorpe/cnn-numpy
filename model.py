@@ -10,10 +10,12 @@ class Model:
     # ToDo add ability to save and load models
 
     losses = {
-        "cross_entropy": Loss.cross_entropy
+        "cross_entropy": Loss.cross_entropy,
+        "binary_cross_entropy": Loss.binary_cross_entropy
     }
     losses_prime = {
-        "cross_entropy": Loss.cross_entropy_prime
+        "cross_entropy": Loss.cross_entropy_prime,
+        "binary_cross_entropy": Loss.binary_cross_entropy_prime
     }
 
     activations = {
@@ -39,11 +41,11 @@ class Model:
     def forward(self, input):
         for layer in self.layers:
             if type(layer) == "dense.Dense":
-                input = input.flatten
+                input = input.flatten()
             input = layer.forward(input)
         return input
 
-    def backward(self, gradient, step=0.005):
+    def backward(self, gradient, step=0.001):
         for layer in reversed(self.layers):
             gradient = layer.backward(gradient, step)
         return gradient
@@ -57,7 +59,7 @@ class Model:
             total_loss = 0
             num_correct = 0
             for i, (image, label) in enumerate(zip(data, labels)):
-                out = self.forward((image / 255) - 0.5)
+                out = self.forward(image / 255)
                 total_loss += self.calculate_loss(out, label)
                 num_correct += 1 if np.argmax(out) == label else 0
 
@@ -68,16 +70,16 @@ class Model:
                     total_loss = 0
                     num_correct = 0
 
-                target = np.zeros(self.layers[-1].nodes)
-                target[label] = 1
-                gradient = self.calculate_loss_prime(out, target)
+                gradient = self.calculate_loss_prime(out, label)
                 gradient = self.backward(gradient, step)
 
     def test(self, data, labels):
         total_loss = 0
         num_correct = 0
         for i, (image, label) in enumerate(zip(data, labels)):
-            out = self.forward((image / 255) - 0.5)
+            if i % 100 == 0:
+                print(i)
+            out = self.forward(image / 255)
             total_loss += self.calculate_loss(out, label)
             num_correct += 1 if np.argmax(out) == label else 0
 
@@ -93,20 +95,25 @@ class Model:
 
 if __name__ == '__main__':
     import mnist
-    from conv import Conv
+    #from keras.datasets import fashion_mnist
+    from conv import Conv, ScipyConv, DepthWiseConv
     from pool import Pool
     from dense import Dense
 
-    train_images = mnist.train_images()[:1000]
-    train_labels = mnist.train_labels()[:1000]
+
+    train_images = mnist.train_images()[:1001]
+    train_labels = mnist.train_labels()[:1001]
+    print(len(train_images))
+
+
 
     model = Model(loss="cross_entropy")
-    model.add_layer(Conv(1, 8))
+    model.add_layer(DepthWiseConv(1, 8))
     model.add_layer(Pool())
-    model.add_layer(Dense(10, 10))
+    model.add_layer(Dense(1352, 10))
 
-    model.train(train_images, train_labels)
+    model.train(train_images, train_labels, epochs=3, step=0.001)
 
-    test_images = mnist.test_images()[:1000]
-    test_labels = mnist.test_labels()[:1000]
+    test_images = mnist.test_images()
+    test_labels = mnist.test_labels()
     model.test(test_images, test_labels)
