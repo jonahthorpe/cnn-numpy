@@ -1,6 +1,7 @@
 import numpy as np
 from activation import Activation
 from model import Model
+import time
 
 
 class Dense:
@@ -10,12 +11,13 @@ class Dense:
         self.input_len = input_len
         self.nodes = nodes
         self.weights = np.random.randn(input_len, nodes) / input_len
-        self.biases = np.random.randn(nodes) / nodes
+        self.biases = np.random.randn(nodes) / input_len
         self.activations = np.zeros(nodes)
         self.activation = Model.activations[activation]
         self.activation_prime = Model.activations_prime[activation]
         self.input_shape = None
         self.input = None
+
 
     def forward(self, input):
         """
@@ -45,22 +47,19 @@ class Dense:
         else:
             d_loss_d_summed_weights = np.dot(d_out_d_summed_weights, d_loss_d_out)
         # ds/dw = input ( t = input * w + b)
-        d_loss_d_weights = np.zeros((self.input_len, self.nodes))
-        for i, input in enumerate(self.input):
-            d_loss_d_weights[i] = input * d_loss_d_summed_weights
+        d_loss_d_weights = d_loss_d_summed_weights * np.array([self.input]).T
 
         # derivative of loss w.r.t bias = dl/ds . ds/db
         # ds/db = 1 ( s = input * w + b)
         # dl/db = dl/ds
         d_loss_d_bias = d_loss_d_summed_weights
-
         # update weights
         self.weights -= step * d_loss_d_weights
         self.biases -= step * d_loss_d_bias
 
         # derivative of loss w.r.t input = dl/ds . ds/di
         # ds/di = w ( t = input * w + b)
-        d_loss_d_input = self.weights @ d_loss_d_summed_weights
+        d_loss_d_input = np.dot(self.weights , d_loss_d_summed_weights)
         return d_loss_d_input.reshape(self.input_shape)
 
 
